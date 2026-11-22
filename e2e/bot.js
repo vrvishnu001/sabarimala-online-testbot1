@@ -466,6 +466,21 @@ function createBot(botId) {
     const SLOT_MSG_SETTLE_MS = 1500; // the slot message is filled in a moment after the box appears
     let resumeFailedBefore = false;  // if resuming failed once, the next round clears the wishlist instead
 
+    /**
+     * Compares the wishlist date (shown as dd-mm-yyyy, e.g. "26-11-2026") with the dates set for this bot
+     * (TARGET_DATES). Returns the matching target date, or null if it is different / cannot be read.
+     */
+    function matchWishlistDate(wishlistDate) {
+        const m = String(wishlistDate || '').match(/(\d{1,2})\D+(\d{1,2})\D+(\d{4})/);
+        if (!m) return null;
+        const day = parseInt(m[1], 10), month = parseInt(m[2], 10), year = parseInt(m[3], 10);
+        return TARGET_DATES.find((t) =>
+            parseInt(t.day, 10) === day &&
+            MONTH_NAMES.indexOf(String(t.month).toUpperCase()) + 1 === month &&
+            parseInt(t.year, 10) === year
+        ) || null;
+    }
+
     async function resumeFromWishlistIfSlotAvailable(page, remaining) {
         if (resumeFailedBefore) {
             console.log('ℹ️ The previous attempt to continue from the wishlist failed, so the wishlist will be cleared this time.');
@@ -492,6 +507,15 @@ function createBot(botId) {
         const wlPilgrims = parseInt(details['No. of Pilgrims'], 10);
         console.log(`Wishlist has an item: date ${wlDate || '?'}, time ${wlTime || '?'}, pilgrims ${Number.isNaN(wlPilgrims) ? '?' : wlPilgrims}. Slot message: "${slotMsg || '(none)'}"`);
 
+        // 1) The wishlist date must be one of the dates set in the bot (the time slot is NOT compared).
+        const matchedDate = matchWishlistDate(wlDate);
+        if (!matchedDate) {
+            console.log(`Wishlist date "${wlDate || 'unreadable'}" is not one of the bot's dates (${TARGET_DATES.map((t) => `${t.label} ${t.year}`).join(', ')}). Clearing the wishlist.`);
+            return null; // caller clears it
+        }
+        console.log(`✅ Wishlist date ${wlDate} matches the bot's date ${matchedDate.label} ${matchedDate.year}.`);
+
+        // 2) The slot of that wishlist item must still be available.
         if (slotMsg) {
             console.log('Slot is NOT available for the wishlist item. Clearing the wishlist.');
             return null; // caller clears it
@@ -500,7 +524,7 @@ function createBot(botId) {
         console.log('✅ Slot is available for the wishlist item. Clicking "Proceed" in the wishlist.');
         const count = Number.isNaN(wlPilgrims) || wlPilgrims < 1 ? remaining.length : Math.min(wlPilgrims, remaining.length);
         const rows = remaining.slice(0, count);
-        lastDate = wlDate; lastSlot = wlTime;
+        lastDate = `${matchedDate.label} ${matchedDate.year}`; lastSlot = wlTime;
         setStatus(rows, 'booking', { slot: lastSlot, date: lastDate });
         setStep(`Round ${progress.round}: continuing from the wishlist (slot ${wlTime || '?'})`);
 
