@@ -1223,49 +1223,6 @@ function createBot(botId) {
     }
 
     /**
-     * The site sometimes marks "Select Route" as invalid (ng-invalid) after we come back from the
-     * pilgrim page, even though the dropdown still shows the route. Add to Wishlist then silently
-     * does nothing. If that happens, select the route again (with real change events), let the
-     * slots reload and pick the same slot again. Returns true if a repair was done.
-     */
-    async function repairRouteIfInvalid(page) {
-        const state = await page.$eval(ROUTE_SELECTOR, (el) => ({
-            invalid: el.classList.contains('ng-invalid') || el.value === '',
-            value: el.value,
-        })).catch(() => null);
-        if (!state || !state.invalid) return false;
-
-        console.log(`⚠️ The page marks "Select Route" as invalid (value "${state.value}"). Selecting the route again...`);
-        await page.selectOption(ROUTE_SELECTOR, ROUTE_VALUE);
-        await page.$eval(ROUTE_SELECTOR, (el) => {
-            for (const type of ['input', 'change', 'blur']) el.dispatchEvent(new Event(type, { bubbles: true }));
-        }).catch(() => {});
-
-        // Changing the route reloads the slot cards: pick the same slot again.
-        try {
-            await page.waitForSelector(AVAILABLE_SLOT_SELECTOR, { timeout: ACTION_TIMEOUT_MS });
-            await page.waitForTimeout(500);
-            const norm = (t) => String(t).replace(/\s+/g, '');
-            const slots = page.locator(TIME_SLOT_CLICK_PARENT);
-            const n = await slots.count();
-            for (let i = 0; i < n; i++) {
-                const time = ((await slots.nth(i).locator('.slot-dar-3').first().innerText()) || '').trim();
-                if (lastSlot && norm(time) === norm(lastSlot)) {
-                    await slots.nth(i).click();
-                    console.log(`Selected slot ${time} again.`);
-                    break;
-                }
-            }
-        } catch (e) {
-            console.log(`ℹ️ Slots were not reloaded after selecting the route again: ${e.message.split('\n')[0]}`);
-        }
-
-        const stillInvalid = await page.$eval(ROUTE_SELECTOR, (el) => el.classList.contains('ng-invalid')).catch(() => false);
-        console.log(stillInvalid ? '⚠️ Route is still marked invalid.' : '✅ Route is valid again.');
-        return true;
-    }
-
-    /**
      * Prints everything needed to tell a BOT problem from a WEBSITE problem when
      * "Add to Wishlist" does nothing: which form fields the site itself marks invalid,
      * the state of the button, the slot cards, and the latest wishlist requests.
@@ -1316,9 +1273,6 @@ function createBot(botId) {
 
         const firstProceedButton = page.locator('button:visible:has-text("Proceed")').first();
 
-        // If the route got reset on the way back from the pilgrim page, repair it BEFORE clicking.
-        await repairRouteIfInvalid(page).catch((e) => console.log(`ℹ️ Route repair problem: ${e.message.split('\n')[0]}`));
-
         // ---- Phase 1: Add to Wishlist -> wait for the Proceed popup (retry the click if needed) ----
         let popupShown = false;
         for (let attempt = 1; attempt <= ADD_TO_WISHLIST_ATTEMPTS && !popupShown; attempt++) {
@@ -1338,9 +1292,15 @@ function createBot(botId) {
                 popupShown = true;
             } catch (e) {
                 console.log(`⚠️ Proceed popup did not appear after attempt ${attempt}. Page says: ${await pageProblemText(page)}`);
-                if (attempt === 1) await dumpWishlistDiagnostics(page, 'after attempt 1');
-                await repairRouteIfInvalid(page).catch((e) => console.log(`ℹ️ Route repair problem: ${e.message.split('\n')[0]}`));
-                await page.waitForTimeout(1000);
+                await dumpWishlistDiagnostics(page, 'popup missing');
+                // Do NOT click again or touch the form: after a successful "Add to Wishlist" the site
+                // resets the booking form (empty route/date, disabled button), so retrying here is useless
+                // and the wishlist is not cleared. Restart from the login page instead; the wishlist check
+                // right after login either finishes this booking (date matches + slot available) or clears it.
+                const siteAccepted = slotApiDiagnostics.some((l) => /addToWishlist\s+2\d\d/i.test(l));
+                throw new Error(siteAccepted
+                    ? 'The site accepted Add to Wishlist but the Proceed popup did not open (the item may be in the wishlist). Restarting from the login page; the wishlist is checked there.'
+                    : 'Add to Wishlist did not open the Proceed popup. Restarting from the login page.');
             }
         }
 
@@ -1351,7 +1311,7 @@ function createBot(botId) {
                 .slice(0, 10);
             console.log(`Current URL: ${page.url()}`);
             console.log(`Visible buttons: ${visibleButtons.join(' | ') || 'none'}`);
-            throw new Error('Add to Wishlist did not open the Proceed popup. Restarting the round.');
+            throw new Error('Could not click Add to Wishlist. Restarting from the login page.');
         }
 
         await checkoutFromProceed(page, firstProceedButton);
