@@ -56,6 +56,7 @@ details{margin-top:14px}summary{cursor:pointer;color:var(--mute);font-size:13px}
 .badge{display:inline-block;padding:1px 9px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid var(--line);color:var(--mute)}
 .badge.booked{color:var(--ok);border-color:var(--ok)}
 .badge.booking{color:var(--go);border-color:var(--go)}
+.badge.skipped{color:#b45309;border-color:#b45309}
 .grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
 @media(max-width:900px){.grid{grid-template-columns:1fr}}
 .pane{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px}
@@ -216,11 +217,12 @@ function renderProgress(n,pr){
  let html='<div class="sum"><span>Booking status</span></div><div class="step">Not started. Press Start Bot '+n+' and the booked / remaining pilgrims will show here.</div>';
  if(pr&&pr.items&&pr.items.length){
   const total=pr.items.length,booked=pr.items.filter(i=>i.status==='booked').length,left=total-booked;
-  const label={pending:'Waiting',booking:'In progress',booked:'Booked'};
+  const label={pending:'Waiting',booking:'In progress',booked:'Booked',skipped:'Skipped, retry later'};
   html=`<div class="sum"><span>Booking status</span><span>Pilgrims: ${total}</span><span class="ok">Booked: ${booked}</span><span class="wait">Remaining: ${left}</span></div>`
    +(pr.step?`<div class="step">${esc(pr.step)}</div>`:'')
+   +(pr.lastMessage?`<div class="step" style="color:#b45309">Last site message (${esc(fmtTime(pr.lastMessage.at))}): "${esc(pr.lastMessage.text)}" &rarr; ${esc(pr.lastMessage.action)}${pr.lastMessage.rows&&pr.lastMessage.rows.length?' (row '+pr.lastMessage.rows.join(', ')+')':''}</div>`:'')
    +`<table><thead><tr><th>Pilgrim row</th><th>Status</th><th>Booked at</th><th>Date</th><th>Slot</th><th>Transaction ID</th></tr></thead><tbody>`
-   +pr.items.map(i=>`<tr><td>Row ${i.row}${i.label?` <span class="step" style="margin:0">(${esc(i.label)})</span>`:''}</td><td><span class="badge ${i.status}">${label[i.status]||i.status}</span></td><td>${i.status==='booked'?esc(fmtTime(i.bookedAt)):'-'}</td><td>${i.status!=='pending'?esc(i.date||'-'):'-'}</td><td>${i.status!=='pending'?esc(i.slot||'-'):'-'}</td><td>${i.status==='booked'?esc(i.txnId||'-'):'-'}</td></tr>`).join('')
+   +pr.items.map(i=>`<tr><td>Row ${i.row}${i.label?` <span class="step" style="margin:0">(${esc(i.label)})</span>`:''}</td><td><span class="badge ${i.status==='pending'&&i.skipped?'skipped':i.status}">${label[i.status==='pending'&&i.skipped?'skipped':i.status]||i.status}</span>${i.note&&i.status==='pending'?`<div class="step" style="margin:3px 0 0;color:#b45309">${esc(i.note)}</div>`:''}</td><td>${i.status==='booked'?esc(fmtTime(i.bookedAt)):'-'}</td><td>${i.status!=='pending'?esc(i.date||'-'):'-'}</td><td>${i.status!=='pending'?esc(i.slot||'-'):'-'}</td><td>${i.status==='booked'?esc(i.txnId||'-'):'-'}</td></tr>`).join('')
    +`</tbody></table>`;
  }
  for(const id of [`b${n}-prog`,`gprog${n}`])$(id).innerHTML=html;
